@@ -1,3 +1,13 @@
+## Goals
+
+- basic Scoop commands
+- single file
+- self-manageable
+
+## Non-goal
+
+- fully follow Scoop manifest structure
+
 ## directory structure:
 
 - $HOME/knife/
@@ -23,5 +33,11 @@ TBA
 
 - [x] downlaod file from url
 - [x] extract
+- [x] update
+
+- [ ] debug mode
+- [ ] force mode
+
 - [ ] database
-- [ ] update
+
+- [ ] init file structure

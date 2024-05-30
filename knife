@@ -2,12 +2,16 @@
 
 import json
 import os
+import re
 import requests
+import stat
 import sys
 import tarfile
 
 USER_HOME = os.environ.get("HOME")
 KNIFE_HOME = f"{USER_HOME}/knife"
+
+SUB_MSG_PREFIX = " - "
 
 
 def read_manifest(app_name):
@@ -16,9 +20,12 @@ def read_manifest(app_name):
     try:
         with open(manifest, "r") as json_file:
             info = json.load(json_file)
-            info["cache_file"] = f"{KNIFE_HOME}/cache/{app_name}-{info['version']}.{info['dl_type']}"
-            info["version_dir"] = f"{KNIFE_HOME}/apps/{app_name}/{info['version']}"
-            info["current_dir"] = f"{KNIFE_HOME}/apps/{app_name}/current"
+            info["_"] = {
+                "manifest_file": manifest,
+                "cache_file"   : f"{KNIFE_HOME}/cache/{app_name}-{info['version']}.{info['dl_type']}",
+                "version_dir"  : f"{KNIFE_HOME}/apps/{app_name}/{info['version']}",
+                "current_dir"  : f"{KNIFE_HOME}/apps/{app_name}/current",
+            }
     except FileNotFoundError:
         raise FileNotFoundError(f"File '{manifest}' not found!")
     except json.JSONDecodeError:
@@ -62,13 +69,60 @@ def create_symlink(target_full_path, link_path, unsafe_target_short_path=None):
     os.symlink(target_full_path, link_path)
 
 
+def chmod_user_executable(path):
+    current_stat = os.stat(path)
+    current_permissions = current_stat.st_mode
+    new_permissions = current_permissions | stat.S_IXUSR
+    os.chmod(path, new_permissions)
+
+    # TODO: error handling
+
+
+def update_manifest(app_name, info=None):
+    if info == None:
+        info = read_manifest(app_name)
+    url = info["checkver"]["url"]
+    regex = info["checkver"]["regex"]
+    upd = info["autoupdate"]
+
+    response = requests.get(url)
+    response.raise_for_status()
+
+    matches = re.findall(regex, response.text)
+    new_version = matches[0]
+    new_url = upd["url"].replace("$version", new_version)
+
+    if info["version"] == new_version:
+        return False
+
+    new_info = {}
+    for k, v in info.items():
+        match k:
+            case "version":
+                new_info["version"] = new_version
+            case "url":
+                new_info["url"] = new_url
+            case "_":
+                pass
+            case _:
+                new_info[k] = v
+
+    with open(info["_"]["manifest_file"], "w") as outfile:
+        json.dump(new_info, outfile, indent=2)
+
+    return True
+
+    # TODO: error handling
+
+
 def check_argc(argc, sub_command, sub_command_need=1):
     if argc < sub_command_need + 2:
         raise ValueError(f"Please provide {sub_command_need} argument(s) for '{sub_command}'!")
 
 
-def cmd_info(app_name):
-    info = read_manifest(app_name)
+def cmd_info(app_name, info=None):
+    if info == None:
+        info = read_manifest(app_name)
     print(f"""
 app     : {app_name}
 version : {info["version"]}
@@ -80,7 +134,7 @@ def cmd_download(app_name, info=None, msg_prefix=""):
     if info == None:
         info = read_manifest(app_name)
     print(f"{msg_prefix}Downloading {app_name}@{info['version']}")
-    download_from_url(info["url"], info["cache_file"])
+    download_from_url(info["url"], info["_"]["cache_file"])
     print(f"{msg_prefix}Download successful")
 
 
@@ -88,7 +142,7 @@ def cmd_extract(app_name, info=None, msg_prefix=""):
     if info == None:
         info = read_manifest(app_name)
     print(f"{msg_prefix}Extracting {app_name}")
-    extract_tar(info["cache_file"], info["dl_type"], info["version_dir"])
+    extract_tar(info["_"]["cache_file"], info["dl_type"], info["_"]["version_dir"])
     print(f"{msg_prefix}Extract successful")
 
 
@@ -96,33 +150,48 @@ def cmd_reset(app_name, info=None, msg_prefix=""):
     if info == None:
         info = read_manifest(app_name)
     print(f"{msg_prefix}Linking current version to {app_name}@{info['version']}")
-    create_symlink(info["version_dir"], info["current_dir"], info["version"])
+    create_symlink(info["_"]["version_dir"], info["_"]["current_dir"], info["version"])
     print(f"{msg_prefix}Link successful")
 
     for bin_pair in info["bin"]:
-        print(f"{msg_prefix}Creating shim '{bin_pair[1]}' for {bin_pair[0]}")
+        print(f"{msg_prefix}Creating shim '{bin_pair[1]}' for executable '{bin_pair[0]}'")
         # TODO: check overwrite
+        chmod_user_executable(f"{info['_']['current_dir']}/{bin_pair[0]}")
         create_symlink(
-            f"{info['current_dir']}/{bin_pair[0]}",
+            f"{info['_']['current_dir']}/{bin_pair[0]}",
             f"{KNIFE_HOME}/shims/{bin_pair[1]}",
             f"../apps/{app_name}/current/{bin_pair[0]}"
         )
         print(f"{msg_prefix}Create successful")
 
 
-def cmd_install(app_name):
-    sub_msg_prefix = " - "
-    info = read_manifest(app_name)
+def cmd_install(app_name, info=None):
+    if info == None:
+        info = read_manifest(app_name)
     print(f"Installing {app_name}@{info['version']} ...")
-    if os.path.exists(info["cache_file"]):
-        print(f"{sub_msg_prefix}Found existing cache")
+    if os.path.exists(info["_"]["cache_file"]):
+        print(f"{SUB_MSG_PREFIX}Found existing cache")
     else:
-        cmd_download(app_name, info, sub_msg_prefix)
+        cmd_download(app_name, info, SUB_MSG_PREFIX)
 
     # TODO: check cache_file again
 
-    cmd_extract(app_name, info, sub_msg_prefix)
-    cmd_reset(app_name, info, sub_msg_prefix)
+    cmd_extract(app_name, info, SUB_MSG_PREFIX)
+    cmd_reset(app_name, info, SUB_MSG_PREFIX)
+
+
+def cmd_update(app_name):
+    info = read_manifest(app_name)
+
+    print(f"Updating {app_name} ...")
+    print(f"{SUB_MSG_PREFIX}Checking new version")
+    if update_manifest(app_name, info):
+        old_version = info["version"]
+        info = read_manifest(app_name)
+        print(f"{SUB_MSG_PREFIX}Found new version {app_name}: {old_version} -> {info['version']}")
+        cmd_install(app_name, info)
+    else:
+        print(f"{SUB_MSG_PREFIX}No update. Current version {info['version']}")
 
 
 if __name__ == "__main__":
@@ -146,5 +215,8 @@ if __name__ == "__main__":
             case "install":
                 check_argc(argc, "install")
                 cmd_install(argv[2])
+            case "update":
+                check_argc(argc, "update")
+                cmd_update(argv[2])
             case _:
                 raise ValueError(f"Unsupported sub command '{argv[1]}'!")
