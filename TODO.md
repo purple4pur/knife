@@ -4,9 +4,9 @@
 - single file
 - self-manageable
 
-## Non-goal
+## Non-goals
 
-- fully follow Scoop manifest structure
+- fully follow/support Scoop manifest structure
 
 ## directory structure:
 
@@ -44,14 +44,14 @@
     "url": "https://github.com/universal-ctags/ctags-nightly-build/releases/latest",
     "regex": "/releases/tag/(?:v|V)?([\\d.]+)\\+([\\da-f]+)",
     "match": {
-      "fulltag": "$1+$2"
+      "fulltag": "${1}+${2}"
     }
   },
   "autoupdate": {
-    "url": "https://github.com/universal-ctags/ctags-nightly-build/releases/download/$fulltag/uctags-$version-linux-x86_64.tar.gz",
+    "url": "https://github.com/universal-ctags/ctags-nightly-build/releases/download/${fulltag}/uctags-${version}-linux-x86_64.tar.gz",
     "bin": [
       [
-        "uctags-$version-linux-x86_64/bin/ctags",
+        "uctags-${version}-linux-x86_64/bin/ctags",
         "ctags"
       ]
     ]

@@ -102,7 +102,7 @@ def refresh_manifest(app_name, info=None):
     autoupdate = info["autoupdate"]
 
     if not "version" in match:
-        match["version"] = "$1"
+        match["version"] = "${1}"
 
     response = requests.get(url)
     response.raise_for_status()
@@ -113,7 +113,7 @@ def refresh_manifest(app_name, info=None):
     local_var = {}
     for var, pattern in match.items():
         for i in range(l):
-            pattern = pattern.replace(f"${i+1}", matches.group(i+1))
+            pattern = pattern.replace(f"${{{i+1}}}", matches.group(i+1))
         local_var[var] = pattern
 
     new_keys = {}
@@ -123,15 +123,15 @@ def refresh_manifest(app_name, info=None):
 
     new_keys["url"] = autoupdate["url"]
     for k, v in local_var.items():
-        new_keys["url"] = new_keys["url"].replace(f"${k}", v)
+        new_keys["url"] = new_keys["url"].replace(f"${{{k}}}", v)
 
     new_keys["bin"] = []
     if "bin" in autoupdate:
         for e in autoupdate["bin"]:
             e = e.copy()
             for k, v in local_var.items():
-                e[0] = e[0].replace(f"${k}", v)
-                e[1] = e[1].replace(f"${k}", v)
+                e[0] = e[0].replace(f"${{{k}}}", v)
+                e[1] = e[1].replace(f"${{{k}}}", v)
             new_keys["bin"].append(e)
     else:
         new_keys["bin"] = info["bin"]
@@ -159,7 +159,7 @@ def check_argc(argc, sub_command, sub_command_need=1):
         raise ValueError(f"Please provide {sub_command_need} argument(s) for '{sub_command}'!")
 
 
-def cmd_info(app_name, info=None):
+def info_one(app_name, info=None):
     if info == None:
         info = read_manifest(app_name)
     bin = ", ".join([e[1] for e in info["bin"]])
@@ -171,7 +171,7 @@ bin     : {bin}
 """)
 
 
-def cmd_download(app_name, info=None, msg_prefix=""):
+def download_one(app_name, info=None, msg_prefix=""):
     if info == None:
         info = read_manifest(app_name)
     print(f"{msg_prefix}Downloading {app_name}@{info['version']}")
@@ -187,7 +187,7 @@ def cmd_download(app_name, info=None, msg_prefix=""):
     print(f"{msg_prefix}Download successful")
 
 
-def cmd_extract(app_name, info=None, msg_prefix=""):
+def extract_one(app_name, info=None, msg_prefix=""):
     if info == None:
         info = read_manifest(app_name)
     print(f"{msg_prefix}Extracting {app_name}")
@@ -200,7 +200,7 @@ def cmd_extract(app_name, info=None, msg_prefix=""):
     print(f"{msg_prefix}Extract successful")
 
 
-def cmd_reset(app_name, info=None, msg_prefix=""):
+def reset_one(app_name, info=None, msg_prefix=""):
     if info == None:
         info = read_manifest(app_name)
     print(f"{msg_prefix}Linking current version to {app_name}@{info['version']}")
@@ -219,43 +219,43 @@ def cmd_reset(app_name, info=None, msg_prefix=""):
         print(f"{msg_prefix}Create successful")
 
 
-def cmd_install(app_name, info=None):
+def install_one(app_name, info=None):
     if info == None:
         info = read_manifest(app_name)
 
     if info["version"] == "":
-        cmd_update(app_name, info)
+        update_one(app_name, info)
         return
 
     print(f"Installing {app_name}@{info['version']} ...")
     if os.path.exists(info["_"]["cache_path"]):
         print(f"{SUB_MSG_PREFIX}Found existing cache")
     else:
-        cmd_download(app_name, info, SUB_MSG_PREFIX)
+        download_one(app_name, info, SUB_MSG_PREFIX)
 
     # TODO: check cache_path again
 
-    cmd_extract(app_name, info, SUB_MSG_PREFIX)
-    cmd_reset(app_name, info, SUB_MSG_PREFIX)
+    extract_one(app_name, info, SUB_MSG_PREFIX)
+    reset_one(app_name, info, SUB_MSG_PREFIX)
 
 
-def cmd_update(app_name, info=None, no_install=False):
+def update_one(app_name, info=None, no_install=False):
     if info == None:
         info = read_manifest(app_name)
     print(f"Refreshing {app_name}'s manifest ...")
 
     print(f"{SUB_MSG_PREFIX}Checking new version")
     if refresh_manifest(app_name, info):
-        old_version = info["version"]
+        old_version = info["version"] if info["version"] != "" else "0"
         info = read_manifest(app_name)
         print(f"{SUB_MSG_PREFIX}Found update: {old_version} -> {info['version']}")
         if not no_install:
-            cmd_install(app_name, info)
+            install_one(app_name, info)
     else:
         print(f"{SUB_MSG_PREFIX}No update. Current version: {info['version']}")
 
 
-def cmd_uninstall(app_name, info=None):
+def uninstall_one(app_name, info=None):
     if info == None:
         info = read_manifest(app_name)
     print(f"Uninstalling {app_name} ...")
@@ -266,35 +266,77 @@ def cmd_uninstall(app_name, info=None):
         print(f"{SUB_MSG_PREFIX}Remove successful")
 
 
-if __name__ == "__main__":
-    argv = sys.argv
-    argc = len(argv)
+def parse_args(argv):
+    cmd = ""
+    sub_cmd = ""
+    apps = []
+    flag = {"verbose": False, "force": False, "debug": False}
 
-    if argc >= 2:
-        match argv[1]:
-            case "info":
-                check_argc(argc, "info")
-                cmd_info(argv[2])
-            case "download":
-                check_argc(argc, "download")
-                cmd_download(argv[2])
-            case "extract":
-                check_argc(argc, "extract")
-                cmd_extract(argv[2])
-            case "reset":
-                check_argc(argc, "reset")
-                cmd_reset(argv[2])
-            case "install":
-                check_argc(argc, "install")
-                cmd_install(argv[2])
-            case "update":
-                check_argc(argc, "update")
-                cmd_update(argv[2])
-            case "refresh":
-                check_argc(argc, "refresh")
-                cmd_update(argv[2], no_install=True)
-            case "uninstall":
-                check_argc(argc, "uninstall")
-                cmd_uninstall(argv[2])
-            case _:
-                raise ValueError(f"Unsupported sub command '{argv[1]}'!")
+    if len(argv) <= 1:
+        raise RuntimeError("TODO: help menu")
+    argv.pop(0)
+
+    while len(argv) > 0:
+        arg = argv.pop(0)
+        if cmd == "":
+            cmd = arg
+
+        elif arg.startswith("-"):
+            arg = arg[1:]
+            if len(arg) == 0:
+                raise RuntimeError("No given flag after -!")
+            is_long = arg[0] == "-"
+            if is_long:
+                arg = arg[1:]
+                match arg:
+                    case "verbose":
+                        flag["verbose"] = True
+                    case "force":
+                        flag["force"] = True
+                    case "debug":
+                        flag["debug"] = True
+                    case "":
+                        raise RuntimeError("No given flag after --!")
+                    case _:
+                        raise RuntimeError(f"Unsupported flag '{arg}'")
+            else:
+                while len(arg) > 0:
+                    a, arg = arg[0], arg[1:]
+                    match a:
+                        case "v":
+                            flag["verbose"] = True
+                        case "f":
+                            flag["force"] = True
+                        case "g":
+                            flag["debug"] = True
+                        case _:
+                            raise RuntimeError(f"Unsupported short flag '{a}'")
+
+        else:
+            apps.append(arg)
+
+    return (cmd, sub_cmd, apps, flag)
+
+
+if __name__ == "__main__":
+    (cmd, sub_cmd, apps, flag) = parse_args(sys.argv)
+
+    match cmd:
+        case "info":
+            info_one(apps[0])
+        case "download":
+            download_one(apps[0])
+        case "extract":
+            extract_one(apps[0])
+        case "reset":
+            reset_one(apps[0])
+        case "install":
+            install_one(apps[0])
+        case "update":
+            update_one(apps[0])
+        case "refresh":
+            update_one(apps[0], no_install=True)
+        case "uninstall":
+            uninstall_one(argv[2])
+        case _:
+            raise ValueError(f"Unsupported sub command '{argv[1]}'!")
