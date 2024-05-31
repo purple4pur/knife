@@ -70,6 +70,7 @@ TBD
 - [x] update
 - [x] uninstall
 
+- [ ] help menu
 - [ ] error handling
 - [ ] error/warning message
 
@@ -79,4 +80,4 @@ TBD
 - [ ] database
 - [ ] list
 
-- [ ] init file structure
+- [x] init file structure

@@ -9,8 +9,16 @@ import stat
 import sys
 import tarfile
 
+KNIFE_VERSION = "0.0.1"
+
 USER_HOME = os.environ.get("HOME")
 KNIFE_HOME = f"{USER_HOME}/knife"
+KNIFE_MANIFEST = """{
+    "version": "init",
+    "url": "",
+    "dl_type": "",
+    "bin": [["knife", "knife"]]
+}"""
 
 SUB_MSG_PREFIX = " - "
 
@@ -43,8 +51,6 @@ def download_from_url(url, out_filename):
         for chunk in response.iter_content(1024):
             f.write(chunk)
 
-    # TODO: error handling
-
 
 def extract_tar(tar_file, tar_type, dest_path):
     match tar_type:
@@ -55,8 +61,6 @@ def extract_tar(tar_file, tar_type, dest_path):
 
     with tarfile.open(tar_file, open_type) as tar:
         tar.extractall(dest_path)
-
-    # TODO: error handling
 
 
 def copy_all_files(src_path, dest_path):
@@ -89,8 +93,6 @@ def chmod_user_executable(path):
     current_permissions = current_stat.st_mode
     new_permissions = current_permissions | stat.S_IXUSR
     os.chmod(path, new_permissions)
-
-    # TODO: error handling
 
 
 def refresh_manifest(app_name, info=None):
@@ -150,13 +152,6 @@ def refresh_manifest(app_name, info=None):
         json.dump(new_info, outfile, indent=2)
 
     return True
-
-    # TODO: error handling
-
-
-def check_argc(argc, sub_command, sub_command_need=1):
-    if argc < sub_command_need + 2:
-        raise ValueError(f"Please provide {sub_command_need} argument(s) for '{sub_command}'!")
 
 
 def info_one(app_name, info=None):
@@ -242,7 +237,7 @@ def install_one(app_name, info=None):
 def update_one(app_name, info=None, no_install=False):
     if info == None:
         info = read_manifest(app_name)
-    print(f"Refreshing {app_name}'s manifest ...")
+    print(f"Refreshing {app_name} ...")
 
     print(f"{SUB_MSG_PREFIX}Checking new version")
     if refresh_manifest(app_name, info):
@@ -253,6 +248,10 @@ def update_one(app_name, info=None, no_install=False):
             install_one(app_name, info)
     else:
         print(f"{SUB_MSG_PREFIX}No update. Current version: {info['version']}")
+
+
+def refresh_one(app_name, info=None):
+    update_one(app_name, info, no_install=True)
 
 
 def uninstall_one(app_name, info=None):
@@ -266,6 +265,40 @@ def uninstall_one(app_name, info=None):
         print(f"{SUB_MSG_PREFIX}Remove successful")
 
 
+def command_wrapper(func, sub_cmd, apps, flag):
+    for app_name in apps:
+        func(app_name)
+
+
+def check_knife_env(cmd):
+    if cmd in ["_exit", "init"]:
+        return
+    has_env = os.path.exists(KNIFE_HOME + "/apps") and os.path.exists(KNIFE_HOME + "/cache") and os.path.exists(KNIFE_HOME + "/manifests") and os.path.exists(KNIFE_HOME + "/shims")
+    if not has_env:
+        raise RuntimeError(f"No Knife env ({KNIFE_HOME}) detected!")
+
+
+def init_knife_env(flag):
+    if not flag["force"] and os.path.exists(KNIFE_HOME):
+        raise RuntimeError(f"You have knife directory ({KNIFE_HOME}) already. To remove and rebuild env, init with '-f' flag.")
+
+    print(f"Initializing Knife env in '{KNIFE_HOME}' ...")
+    if os.path.exists(KNIFE_HOME):
+        shutil.rmtree(KNIFE_HOME)
+    os.makedirs(KNIFE_HOME + "/apps/knife/init")
+    os.makedirs(KNIFE_HOME + "/cache")
+    os.makedirs(KNIFE_HOME + "/manifests")
+    os.makedirs(KNIFE_HOME + "/shims")
+
+    shutil.copy2(sys.argv[0], KNIFE_HOME + "/apps/knife/init/knife")
+    with open(KNIFE_HOME + "/manifests/knife.json", "w") as outfile:
+        outfile.write(KNIFE_MANIFEST)
+    reset_one("knife", msg_prefix=SUB_MSG_PREFIX)
+
+    print(f"Now add '{KNIFE_HOME}/shims' to your $PATH, then play with command 'knife'!")
+    print("\nTip: Current file has been copied into Knife env. You can safely remove this!")
+
+
 def parse_args(argv):
     cmd = ""
     sub_cmd = ""
@@ -273,8 +306,21 @@ def parse_args(argv):
     flag = {"verbose": False, "force": False, "debug": False}
 
     if len(argv) <= 1:
-        raise RuntimeError("TODO: help menu")
+        print("TODO: help menu")
+        cmd = "_exit"
+        return (cmd, sub_cmd, apps, flag)
     argv.pop(0)
+
+    if argv[0] == "--help":
+        print("TODO: help menu")
+        cmd = "_exit"
+        return (cmd, sub_cmd, apps, flag)
+
+    if argv[0] == "--version":
+        print(f"Knife {KNIFE_VERSION}")
+        print("Knife: a minimal Scoop-like user-scope package manager on Linux.")
+        cmd = "_exit"
+        return (cmd, sub_cmd, apps, flag)
 
     while len(argv) > 0:
         arg = argv.pop(0)
@@ -298,7 +344,7 @@ def parse_args(argv):
                     case "":
                         raise RuntimeError("No given flag after --!")
                     case _:
-                        raise RuntimeError(f"Unsupported flag '{arg}'")
+                        raise RuntimeError(f"Unsupported long flag '{arg}'")
             else:
                 while len(arg) > 0:
                     a, arg = arg[0], arg[1:]
@@ -312,31 +358,41 @@ def parse_args(argv):
                         case _:
                             raise RuntimeError(f"Unsupported short flag '{a}'")
 
+        elif arg == "help":
+            sub_cmd = "help"
         else:
             apps.append(arg)
 
+    if len(apps) == 0:
+        sub_cmd = "help"
     return (cmd, sub_cmd, apps, flag)
 
 
 if __name__ == "__main__":
-    (cmd, sub_cmd, apps, flag) = parse_args(sys.argv)
+    (cmd, sub_cmd, apps, flag) = parse_args(sys.argv.copy())
+
+    check_knife_env(cmd)
 
     match cmd:
+        case "_exit":
+            pass
+        case "init":
+            init_knife_env(flag)
         case "info":
-            info_one(apps[0])
+            command_wrapper(info_one, sub_cmd, apps, flag)
         case "download":
-            download_one(apps[0])
+            command_wrapper(download_one, sub_cmd, apps, flag)
         case "extract":
-            extract_one(apps[0])
+            command_wrapper(extract_one, sub_cmd, apps, flag)
         case "reset":
-            reset_one(apps[0])
+            command_wrapper(reset_one, sub_cmd, apps, flag)
         case "install":
-            install_one(apps[0])
+            command_wrapper(install_one, sub_cmd, apps, flag)
         case "update":
-            update_one(apps[0])
+            command_wrapper(update_one, sub_cmd, apps, flag)
         case "refresh":
-            update_one(apps[0], no_install=True)
+            command_wrapper(refresh_one, sub_cmd, apps, flag)
         case "uninstall":
-            uninstall_one(argv[2])
+            command_wrapper(uninstall_one, sub_cmd, apps, flag)
         case _:
-            raise ValueError(f"Unsupported sub command '{argv[1]}'!")
+            raise ValueError(f"Unsupported command '{cmd}'!")
